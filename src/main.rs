@@ -76,12 +76,21 @@ fn main() -> ! {
     led_pin.set_low().unwrap();
 
     // Configure DT and CLK pins, typically pullup input
-    let rotary_dt = pins.gpio0.into_pull_up_input();
-    let rotary_clk = pins.gpio1.into_pull_up_input();
-    let btn_sw = pins.gpio2.into_pull_up_input();
+    let lr_rotary_dt = pins.gpio0.into_pull_up_input();
+    let lr_rotary_clk = pins.gpio1.into_pull_up_input();
+    let btn_enter = pins.gpio2.into_pull_up_input();
 
     // Initialize the rotary encoder
-    let mut rotary_encoder = RotaryEncoder::new(rotary_dt, rotary_clk).into_standard_mode();
+    let mut lr_rotary_encoder =
+        RotaryEncoder::new(lr_rotary_dt, lr_rotary_clk).into_standard_mode();
+
+    let ud_rotary_dt = pins.gpio10.into_pull_up_input();
+    let ud_rotary_clk = pins.gpio11.into_pull_up_input();
+    let btn_esc = pins.gpio12.into_pull_up_input();
+
+    // Initialize the rotary encoder
+    let mut ud_rotary_encoder =
+        RotaryEncoder::new(ud_rotary_dt, ud_rotary_clk).into_standard_mode();
 
     let mut input_count_down = timer.count_down();
     input_count_down.start(2.millis());
@@ -92,13 +101,13 @@ fn main() -> ! {
     loop {
         //Poll the keys every 2ms
         if input_count_down.wait().is_ok() {
-            let dir = rotary_encoder.update();
-            let keys = get_keys(dir);
-            if btn_sw.as_input().is_low().unwrap() {
-                led_pin.set_high().unwrap();
-            } else {
-                led_pin.set_low().unwrap();
-            }
+            let lr_dir = lr_rotary_encoder.update();
+            let enter = btn_enter.as_input().is_low().unwrap();
+
+            let ud_dir = ud_rotary_encoder.update();
+            let esc = btn_esc.as_input().is_low().unwrap();
+
+            let keys = get_keys(lr_dir, enter, ud_dir, esc);
             match keyboard.device().write_report(keys) {
                 Err(UsbHidError::WouldBlock) => {}
                 Err(UsbHidError::Duplicate) => {}
@@ -135,17 +144,37 @@ fn main() -> ! {
     }
 }
 
-fn get_keys(dir: Direction) -> [Keyboard; 2] {
+fn get_keys(lr_dir: Direction, enter: bool, ud_dir: Direction, esc: bool) -> [Keyboard; 6] {
     [
-        if dir == Direction::Anticlockwise {
+        if lr_dir == Direction::Anticlockwise {
             Keyboard::LeftArrow
         } else {
             Keyboard::NoEventIndicated
         }, //Left
-        if dir == Direction::Clockwise {
+        if lr_dir == Direction::Clockwise {
             Keyboard::RightArrow
         } else {
             Keyboard::NoEventIndicated
-        }, //Right
+        },
+        if enter {
+            Keyboard::ReturnEnter
+        } else {
+            Keyboard::NoEventIndicated
+        },
+        if ud_dir == Direction::Anticlockwise {
+            Keyboard::DownArrow
+        } else {
+            Keyboard::NoEventIndicated
+        }, //Left
+        if ud_dir == Direction::Clockwise {
+            Keyboard::UpArrow
+        } else {
+            Keyboard::NoEventIndicated
+        },
+        if esc {
+            Keyboard::Escape
+        } else {
+            Keyboard::NoEventIndicated
+        },
     ]
 }
