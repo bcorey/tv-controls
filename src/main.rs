@@ -10,8 +10,14 @@ use embedded_hal::digital::*;
 use fugit::ExtU32;
 use hal::pac;
 use panic_probe as _;
+use rotary_encoder_embedded::standard::StandardMode;
 use rotary_encoder_embedded::Direction;
 use rotary_encoder_embedded::RotaryEncoder;
+use rp2040_hal::gpio::FunctionSio;
+use rp2040_hal::gpio::Pin;
+use rp2040_hal::gpio::PinId;
+use rp2040_hal::gpio::PullUp;
+use rp2040_hal::gpio::SioInput;
 #[allow(clippy::wildcard_imports)]
 use usb_device::class_prelude::*;
 use usb_device::prelude::*;
@@ -75,22 +81,41 @@ fn main() -> ! {
     let mut led_pin = pins.led.into_push_pull_output();
     led_pin.set_low().unwrap();
 
-    // Configure DT and CLK pins, typically pullup input
-    let lr_rotary_dt = pins.gpio0.into_pull_up_input();
-    let lr_rotary_clk = pins.gpio1.into_pull_up_input();
-    let btn_enter = pins.gpio2.into_pull_up_input();
+    let mut top_knob = Knob::new(
+        pins.gpio11.into_pull_up_input(),
+        pins.gpio12.into_pull_up_input(),
+        pins.gpio13.into_pull_up_input(),
+        Keyboard::LeftArrow,
+        Keyboard::RightArrow,
+        Keyboard::ReturnEnter,
+    );
 
-    // Initialize the rotary encoder
-    let mut lr_rotary_encoder =
-        RotaryEncoder::new(lr_rotary_dt, lr_rotary_clk).into_standard_mode();
+    let mut lower_knob = Knob::new(
+        pins.gpio21.into_pull_up_input(),
+        pins.gpio20.into_pull_up_input(),
+        pins.gpio19.into_pull_up_input(),
+        Keyboard::DownArrow,
+        Keyboard::UpArrow,
+        Keyboard::Escape,
+    );
 
-    let ud_rotary_dt = pins.gpio10.into_pull_up_input();
-    let ud_rotary_clk = pins.gpio11.into_pull_up_input();
-    let btn_esc = pins.gpio12.into_pull_up_input();
+    let mut bright_knob = Knob::new(
+        pins.gpio27.into_pull_up_input(),
+        pins.gpio26.into_pull_up_input(),
+        pins.gpio22.into_pull_up_input(),
+        Keyboard::X,
+        Keyboard::Y,
+        Keyboard::Z,
+    );
 
-    // Initialize the rotary encoder
-    let mut ud_rotary_encoder =
-        RotaryEncoder::new(ud_rotary_dt, ud_rotary_clk).into_standard_mode();
+    let mut volume_knob = Knob::new(
+        pins.gpio18.into_pull_up_input(),
+        pins.gpio17.into_pull_up_input(),
+        pins.gpio16.into_pull_up_input(),
+        Keyboard::A,
+        Keyboard::B,
+        Keyboard::F5,
+    );
 
     let mut input_count_down = timer.count_down();
     input_count_down.start(2.millis());
@@ -101,13 +126,12 @@ fn main() -> ! {
     loop {
         //Poll the keys every 2ms
         if input_count_down.wait().is_ok() {
-            let lr_dir = lr_rotary_encoder.update();
-            let enter = btn_enter.as_input().is_low().unwrap();
-
-            let ud_dir = ud_rotary_encoder.update();
-            let esc = btn_esc.as_input().is_low().unwrap();
-
-            let keys = get_keys(lr_dir, enter, ud_dir, esc);
+            let keys = [
+                top_knob.update(),
+                lower_knob.update(),
+                bright_knob.update(),
+                volume_knob.update(),
+            ];
             match keyboard.device().write_report(keys) {
                 Err(UsbHidError::WouldBlock) => {}
                 Err(UsbHidError::Duplicate) => {}
@@ -144,37 +168,53 @@ fn main() -> ! {
     }
 }
 
-fn get_keys(lr_dir: Direction, enter: bool, ud_dir: Direction, esc: bool) -> [Keyboard; 6] {
-    [
-        if lr_dir == Direction::Anticlockwise {
-            Keyboard::LeftArrow
-        } else {
-            Keyboard::NoEventIndicated
-        }, //Left
-        if lr_dir == Direction::Clockwise {
-            Keyboard::RightArrow
-        } else {
-            Keyboard::NoEventIndicated
-        },
-        if enter {
-            Keyboard::ReturnEnter
-        } else {
-            Keyboard::NoEventIndicated
-        },
-        if ud_dir == Direction::Anticlockwise {
-            Keyboard::DownArrow
-        } else {
-            Keyboard::NoEventIndicated
-        }, //Left
-        if ud_dir == Direction::Clockwise {
-            Keyboard::UpArrow
-        } else {
-            Keyboard::NoEventIndicated
-        },
-        if esc {
-            Keyboard::Escape
-        } else {
-            Keyboard::NoEventIndicated
-        },
-    ]
+// push, left, right.
+// 4 knobs.
+struct Knob<DT: PinId, CLK: PinId, BTN: PinId> {
+    encoder: RotaryEncoder<
+        StandardMode,
+        Pin<DT, FunctionSio<SioInput>, PullUp>,
+        Pin<CLK, FunctionSio<SioInput>, PullUp>,
+    >,
+    button: Pin<BTN, FunctionSio<SioInput>, PullUp>,
+    on_counterclockwise: Keyboard,
+    on_clockwise: Keyboard,
+    on_press: Keyboard,
+}
+
+impl<DT, CLK, BTN> Knob<DT, CLK, BTN>
+where
+    DT: PinId,
+    CLK: PinId,
+    BTN: PinId,
+{
+    fn new(
+        dt: Pin<DT, FunctionSio<SioInput>, PullUp>,
+        clk: Pin<CLK, FunctionSio<SioInput>, PullUp>,
+        btn: Pin<BTN, FunctionSio<SioInput>, PullUp>,
+        on_counterclockwise: Keyboard,
+        on_clockwise: Keyboard,
+        on_press: Keyboard,
+    ) -> Self {
+        let encoder = RotaryEncoder::new(dt, clk).into_standard_mode();
+        Self {
+            encoder,
+            button: btn,
+            on_counterclockwise,
+            on_clockwise,
+            on_press,
+        }
+    }
+
+    fn update(&mut self) -> Keyboard {
+        let direction = self.encoder.update();
+        let btn = self.button.as_input().is_low().unwrap();
+        println!("{}", btn);
+        match direction {
+            Direction::Anticlockwise => self.on_counterclockwise,
+            Direction::Clockwise => self.on_clockwise,
+            Direction::None if btn => self.on_press,
+            _ => Keyboard::NoEventIndicated,
+        }
+    }
 }
