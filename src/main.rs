@@ -1,8 +1,6 @@
 #![no_std]
 #![no_main]
 
-use core::array::IntoIter;
-
 use bsp::entry;
 use bsp::hal;
 use cortex_m::prelude::*;
@@ -23,7 +21,6 @@ use rp2040_hal::gpio::SioInput;
 #[allow(clippy::wildcard_imports)]
 use usb_device::class_prelude::*;
 use usb_device::prelude::*;
-use usbd_human_interface_device::device::keyboard::BootKeyboard;
 use usbd_human_interface_device::page::Keyboard;
 use usbd_human_interface_device::prelude::*;
 
@@ -117,7 +114,8 @@ fn main() -> ! {
         pins.gpio16.into_pull_up_input(),
         Input([Keyboard::A; 3]),
         Input([Keyboard::B; 3]),
-        Input([Keyboard::LeftControl, Keyboard::LeftShift, Keyboard::E]),
+        // LeftGUI = CMD
+        Input([Keyboard::LeftGUI, Keyboard::LeftAlt, Keyboard::R]),
     );
 
     let mut input_count_down = timer.count_down();
@@ -211,7 +209,6 @@ where
     fn update(&mut self) -> impl Iterator<Item = Keyboard> {
         let direction = self.encoder.update();
         let btn = self.button.as_input().is_low().unwrap();
-        println!("{}", btn);
         match direction {
             Direction::Anticlockwise => self.on_counterclockwise.clone().into_iter(),
             Direction::Clockwise => self.on_clockwise.clone().into_iter(),
